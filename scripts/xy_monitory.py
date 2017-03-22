@@ -2,6 +2,7 @@
 import importme
 
 from common.logger import setup_logger
+from common.utils import to_float
 
 from bs4 import BeautifulSoup
 import logging
@@ -19,6 +20,13 @@ class Product(object):
         self.close_time = None
         self.expire_time = None
 
+    def set_yield_rate(self, rate):
+        self.yield_rate = rate
+        if rate.find('%'):
+            float_rate = to_float(rate.replace('%', ''))
+            if float_rate:
+                self.yield_rate = float_rate
+
     def __iter__(self):
         return iter([
             ('title', self.title),
@@ -27,6 +35,12 @@ class Product(object):
             ('close_time', self.close_time),
             ('expire_time', self.expire_time),
         ])
+
+    def __str__(self):
+        info = ''
+        for key, val in iter(self):
+            info += '%s: %s\n' % (key, val)
+        return info
 
 
 class BankFetcher(object):
@@ -65,7 +79,6 @@ class BankFetcher(object):
 
         boxes = soup.find_all('div', {'class': 'product-box'})
         if not boxes or len(boxes) != 1:
-            print 'boxes'
             return products
 
         box = boxes[0]
@@ -81,7 +94,7 @@ class BankFetcher(object):
                 if key == u'转让价格':
                     product.price = value
                 elif key == u'自动到期' or key == u'智能续期':
-                    product.yield_rate = value
+                    product.set_yield_rate(value)
 
             infos = item.find('div', {'class': 'product-info'}).find_all('em')
             for index, info in enumerate(infos):
@@ -91,6 +104,12 @@ class BankFetcher(object):
                     product.expire_time = info.text
 
             products.append(product)
+            if isinstance(product.yield_rate, float) and product.yield_rate >= 8.0:
+                info = ''
+                for key, val in iter(product):
+                    info += '%s: %s\n' % (key, val)
+                print info
+
         return products
 
 
@@ -106,7 +125,7 @@ class BankMonitor(object):
                 products = self.fetcher.parse(resp)
                 self.save_product(products)
             time.sleep(5)
-    
+
     def save_product(self, products):
         info = ''
         for product in products:
