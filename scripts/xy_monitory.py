@@ -5,12 +5,17 @@ from common.logger import setup_logger
 from common.utils import to_float
 
 from bs4 import BeautifulSoup
+import click
 import logging
 import json
 import requests
 import time
 
-logger = setup_logger('monitory', 'monitor.log', logging.DEBUG)
+logger = setup_logger(__name__, 'monitor.log')
+
+@click.group()
+def cli():
+    pass
 
 class Product(object):
     def __init__(self):
@@ -47,11 +52,10 @@ class BankFetcher(object):
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36',
-        'Cookie': 'Hm_lvt_9311ae0af3818e9231e72458be9cdbce=1490088074,1490088398,1490088508,1490088540; Hm_lpvt_9311ae0af3818e9231e72458be9cdbce=1490088552; JSESSIONID=cDpTYRXJTn1GLTtMQ0B8GZ9QQ5hDRYn1GqKfzjyn9h71hKyTZ8g9!216974286',
     }
 
-    def __init__(self):
-        pass
+    def __init__(self, cookie):
+        self.HEADERS['Cookie'] = cookie
 
     def fetch(self, page = 1):
         url = 'https://3g.cib.com.cn/app/20173.html'
@@ -104,7 +108,7 @@ class BankFetcher(object):
                     product.expire_time = info.text
 
             products.append(product)
-            if isinstance(product.yield_rate, float) and product.yield_rate >= 8.0:
+            if isinstance(product.yield_rate, float) and product.yield_rate >= 7.0:
                 info = ''
                 for key, val in iter(product):
                     info += '%s: %s\n' % (key, val)
@@ -115,8 +119,8 @@ class BankFetcher(object):
 
 class BankMonitor(object):
 
-    def __init__(self):
-        self.fetcher = BankFetcher()
+    def __init__(self, cookie):
+        self.fetcher = BankFetcher(cookie)
 
     def monitor(self):
         while True:
@@ -135,5 +139,10 @@ class BankMonitor(object):
         logger.info(info)
 
 if __name__ == '__main__':
-    monitor = BankMonitor()
-    monitor.monitor()
+    @cli.command(name = 'monitor')
+    @click.argument('cookie')
+    def xy_monitor(cookie):
+        monitor = BankMonitor(cookie)
+        monitor.monitor()
+
+    cli()
