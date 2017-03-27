@@ -8,17 +8,15 @@ from bs4 import BeautifulSoup
 import click
 import logging
 import json
+import re
 import requests
 import time
 
 logger = setup_logger(__name__, 'monitor.log')
 
-@click.group()
-def cli():
-    pass
-
 class Product(object):
     def __init__(self):
+        self.id = None
         self.title = ''
         self.price = None
         self.yield_rate = None
@@ -34,6 +32,7 @@ class Product(object):
 
     def __iter__(self):
         return iter([
+            ('id', self.id),
             ('title', self.title),
             ('price', self.price),
             ('yield_rate', self.yield_rate),
@@ -42,20 +41,21 @@ class Product(object):
         ])
 
     def __str__(self):
-        info = ''
+        info = u''
         for key, val in iter(self):
-            info += '%s: %s\n' % (key, val)
-        return info
-
+            info += u'%s: %s\n' % (key, val)
+        return info.encode('utf-8')
 
 class BankFetcher(object):
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36',
+        'Cookie': 'Hm_lvt_9311ae0af3818e9231e72458be9cdbce=1490088074,1490088398,1490088508,1490088540; JSESSIONID=fMHDYYrFmcpcR1cdzmndQCJlgTvgjHY5sLSGGLQ7JWc9vf4kP5G2!216974286'
     }
 
     def __init__(self, cookie):
-        self.HEADERS['Cookie'] = cookie
+        pass
+        #self.HEADERS['Cookie'] = cookie
 
     def fetch(self, page = 1):
         url = 'https://3g.cib.com.cn/app/20173.html'
@@ -77,6 +77,14 @@ class BankFetcher(object):
 
         return resp.content
 
+    def parse_product_id(self, item):
+        '''
+        javascript:buy('91117025','0001','20170321','2017032105021675','105','0');
+        '''
+        RE = '''javascript:buy\('\d+','\d+','\d+','(?P<pid>\d+)','\d+','\d+'\);'''
+        info = re.search(RE, item).groupdict()
+        return info.get('pid', None)
+
     def parse(self, resp):
         soup = BeautifulSoup(resp, 'html.parser')
         products = []
@@ -90,6 +98,7 @@ class BankFetcher(object):
         for item in product_infos:
             product = Product()
 
+            product.id = self.parse_product_id(item.a['href'])
             product.title = item.h2.text.strip('\n\r ')
             describes = item.find('div', {'class': 'product-describe'}).find_all('div')
             for describe in describes:
@@ -102,8 +111,10 @@ class BankFetcher(object):
 
             infos = item.find('div', {'class': 'product-info'}).find_all('em')
             for index, info in enumerate(infos):
+                # 截止日期
                 if index == 0:
                     product.close_time = info.text
+                # 到期日期
                 elif index == 1:
                     product.expire_time = info.text
 
@@ -138,11 +149,30 @@ class BankMonitor(object):
             info += '\n'
         logger.info(info)
 
+@click.group()
+def cli():
+    pass
+
 if __name__ == '__main__':
+
     @cli.command(name = 'monitor')
     @click.argument('cookie')
     def xy_monitor(cookie):
         monitor = BankMonitor(cookie)
         monitor.monitor()
+
+    @cli.command(name = 'parser')
+    @click.argument('filename')
+    def cli_parser(filename):
+        '''
+        解析产品
+        '''
+        with open(filename, 'rb') as input_file:
+            resp = input_file.read()
+
+        fetcher = BankFetcher(None)
+        products = fetcher.parse(resp)
+        for product in products:
+            print str(product)
 
     cli()
