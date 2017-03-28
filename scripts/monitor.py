@@ -6,13 +6,15 @@ from common.utils import to_float
 
 from bs4 import BeautifulSoup
 import click
+import datetime
 import logging
 import json
 import re
 import requests
 import time
 
-logger = setup_logger(__name__, 'monitor.log')
+logger = setup_logger('monitor', 'monitor.log')
+change_logger = setup_logger('change', 'change.log')
 
 class Product(object):
     def __init__(self):
@@ -46,11 +48,26 @@ class Product(object):
             info += u'%s: %s\n' % (key, val)
         return info.encode('utf-8')
 
+class ProductChange(object):
+    def __init__(self):
+        self.product_id = None
+        self.up_time = None
+        self.down_time = None
+        self.product = None
+
+    def __iter__(self):
+        return iter([
+            ('up_time', self.up_time),
+            ('down_time', self.down_time),
+            ('product', dict(self.product) if self.product else None),
+        ])
+
+
 class BankFetcher(object):
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36',
-        'Cookie': 'Hm_lvt_9311ae0af3818e9231e72458be9cdbce=1490088074,1490088398,1490088508,1490088540; JSESSIONID=fMHDYYrFmcpcR1cdzmndQCJlgTvgjHY5sLSGGLQ7JWc9vf4kP5G2!216974286'
+        'Cookie': 'Hm_lvt_9311ae0af3818e9231e72458be9cdbce=1490088074,1490088398,1490088508,1490088540; JSESSIONID=BZm1YZQFCm21p14fLSyyQJ0KhyGyXtQRwnGmgVC2bjTdTGCkSLTy!1102000751'
     }
 
     def __init__(self, cookie):
@@ -133,6 +150,13 @@ class BankMonitor(object):
     def __init__(self, cookie):
         self.fetcher = BankFetcher(cookie)
 
+    def get_products(self):
+        resp = self.fetcher.fetch()
+        if resp:
+            products = self.fetcher.parse(resp)
+            return dict([(item.id, item) for item in products])
+        return {}
+
     def monitor(self):
         while True:
             resp = self.fetcher.fetch()
@@ -149,21 +173,82 @@ class BankMonitor(object):
             info += '\n'
         logger.info(info)
 
-@click.group()
-def cli():
-    pass
+
+class BankChangeMonitor(BankMonitor):
+    '''
+    变动检测
+    '''
+
+    def __init__(self, cookie = None):
+        super(BankChangeMonitor, self).__init__(cookie)
+        self.changes = {}
+
+    def monitor_change(self):
+        while True:
+            cur = self.get_products()
+            self.products_change(cur)
+
+            self.dump_changes()
+            time.sleep(5)
+
+    def products_change(self, cur):
+        now = str(datetime.datetime.now())
+
+        # 下榜时间
+        for pid, change in self.changes.iteritems():
+            cur_info = cur.get(pid)
+            if not cur_info:
+                change.down_time = now
+
+        # 上榜时间
+        for pid, product in cur.iteritems():
+            change = self.changes.get(pid)
+            if change:
+                continue
+
+            change = ProductChange()
+            change.product_id = pid
+            change.product = product
+            change.up_time = now
+            self.changes[pid] = change
+
+    def dump_changes(self):
+        changes = [dict(item) for item in self.changes.values()]
+        change_logger.info(json.dumps(changes, indent = 4, ensure_ascii = False))
+
+        '''
+        changes = []
+        for pid, change in self.changes.iteritems():
+            if not changes.up_time or not changes.down_time:
+                pass
+        '''
 
 if __name__ == '__main__':
+    @click.group()
+    def cli():
+        pass
 
     @cli.command(name = 'monitor')
     @click.argument('cookie')
     def xy_monitor(cookie):
+        '''
+        监控
+        '''
         monitor = BankMonitor(cookie)
         monitor.monitor()
 
-    @cli.command(name = 'parser')
+    @cli.command(name = 'monitor_change')
+    @click.argument('cookie', default = '')
+    def xy_change_monitor(cookie):
+        '''
+        变动监控
+        '''
+        monitor = BankChangeMonitor(cookie)
+        monitor.monitor_change()
+
+    @cli.command(name = 'parse')
     @click.argument('filename')
-    def cli_parser(filename):
+    def cli_parse(filename):
         '''
         解析产品
         '''
